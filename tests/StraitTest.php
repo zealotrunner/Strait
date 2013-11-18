@@ -15,6 +15,10 @@ class StraitTest extends PHPUnit_Framework_TestCase {
 		$this->assertEquals(
 			$c->hello(),   'Hello C'
 		);
+		$this->assertEquals(
+			C::walk_a(),   'A is walking'
+		);
+
 	}
 
 }
@@ -41,7 +45,9 @@ class TraitA extends Strait\Strait {
 
 class TraitB extends Strait\Strait {
 
-	private $b_is_talking = "B is talking";
+	private $b_is_talking = 'B is talking';
+
+	public static $b_is_jumping = 'A is jumping';
 
 	public function talk_b() {
 		return $this->b_is_talking;
@@ -54,11 +60,12 @@ class TraitB extends Strait\Strait {
 
 class C extends Strait\Straits {
 
-	protected $name = 'C';
-
-	public function __construct() {
-		parent::__construct('TraitA', 'TraitB');
+	protected static function traits($use) {
+		$use('TraitA');
+		$use('TraitB');
 	}
+
+	protected $name = 'C';
 
 	public function go() {
 		return 'go ' . $this->private_a;

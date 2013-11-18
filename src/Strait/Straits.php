@@ -2,8 +2,28 @@
 
 namespace Strait;
 
+function debug($var) {
+    // if (!defined("DEBUG_MODE")) return;
+
+    $is_cli = php_sapi_name() == 'cli' || empty($_SERVER['REMOTE_ADDR']);
+    $prefix = $is_cli ? "" : '<pre>';
+    $suffix = $is_cli ? "\n" : '</pre>';
+
+    echo $prefix;
+    if (is_string($var)) {
+        echo $var;
+    } else {
+        print_r($var);
+    }
+    echo $suffix;
+}
+
+function req() {
+	$classes = func_get_args();
+}
+
 function pluck($object, $property) {
-	$reflection = XReflectionObject::i($object);
+	$reflection = XReflection::i($object);
 
 	if ($reflection->hasProperty($property)) {
 		$property = $reflection->getProperty($property);
@@ -17,34 +37,34 @@ function pluck($object, $property) {
 }
 
 function invoke($object, $method, $args) {
-	$reflection = XReflectionObject::i($object);
+	$reflection = XReflection::i($object);
 
 	if ($reflection->hasMethod($method)) {
 		$method = $reflection->getMethod($method);
 		$method->setAccessible(true);
 
-		return $method->invokeArgs($object, $args);
+		return $method->invokeArgs(is_object($object) ? $object : null, $args);
 	} else {
 		trigger_error('Call to undefined method ' . get_class($object)  . '::'. $method, E_USER_ERROR);
 	}
 }
 
-class XReflectionObject extends \ReflectionObject {
+class XReflection {
 
 	private $object;
-
 	private static $objects = array();
 
-	public function __construct($object) {
-		parent::__construct($object);
-
-		$this->object = $object;
-	}
-
 	public static function i($object) {
-		$id = spl_object_hash($object);
-		if (empty(self::$objects[$id])) {
-			self::$objects[$id] = new self($object);
+		if (is_object($object)) {
+			$id = spl_object_hash($object);
+			if (empty(self::$objects[$id])) {
+				self::$objects[$id] = new \ReflectionObject($object);
+			}
+		} else {
+			$id = $object;
+			if (empty(self::$objects[$id])) {
+				self::$objects[$id] = new \ReflectionClass($object);
+			}
 		}
 
 		return self::$objects[$id];
@@ -55,22 +75,23 @@ class XReflectionObject extends \ReflectionObject {
 	}
 }
 
-
 abstract class Straits {
 
-	private $classes;
-
-	protected function __construct(/* classes */) {
-		$classes = func_get_args();
-		$self = $this;
-		$this->classes = array_map(function($c) use ($self) {
-			return new $c($self);
-		}, $classes);
-
-	}
+	private $_traits = null;
+	private static $_trait_classes = null;
 
 	public function __call($method, $args) {
-		foreach ($this->classes as $c) {
+		foreach (self::_traits() as $t) {
+			if (!method_exists($t, $method)) continue;
+
+			return invoke($t, $method, $args);
+		}
+
+		trigger_error('Fatal error: Call to undefined method ' . get_called_class()  . '::'. $method . '()', E_USER_ERROR);
+	}
+
+	public static function __callStatic($method, $args) {
+		foreach (self::_trait_classes() as $c) {
 			if (!method_exists($c, $method)) continue;
 
 			return invoke($c, $method, $args);
@@ -79,24 +100,39 @@ abstract class Straits {
 		trigger_error('Fatal error: Call to undefined method ' . get_called_class()  . '::'. $method . '()', E_USER_ERROR);
 	}
 
-	// public function __callStatic($method, $args) {
-	// 	foreach ($this->classes as $c) {
-	// 		if (!method_exists($c, $method)) continue;
-
-	// 		return invoke($c, $method, $args);
-	// 	}
-
-	// 	trigger_error('Fatal error: Call to undefined method ' . get_called_class()  . '::'. $method . '()', E_USER_ERROR);
-	// }
-
 	public function __get($property) {
-		foreach ($this->classes as $c) {
-			if (!property_exists($c, $key)) continue;
+		foreach (self::_traits() as $t) {
+			if (!property_exists($t, $key)) continue;
 
-			return pluck($c, $property);
+			return pluck($t, $property);
 		}
 
 		trigger_error('Undefined property: ' . get_called_class() . '::$' . $property, E_USER_ERROR);
 	}
+
+	private function _traits() {
+		if ($this->_traits === null) {
+			$this->_traits = array();
+			foreach (self::_trait_classes() as $t) {
+				$this->_traits[] = new $t($this);
+			}
+		}
+
+		return $this->_traits;
+	}
+
+	private static function _trait_classes() {
+		if (self::$_trait_classes === null) {
+			$traits = array();
+			static::traits(function($t) use (&$traits) {
+				return $traits[] = $t;
+			});
+			self::$_trait_classes = $traits;
+		}
+
+		return self::$_trait_classes;
+	}
+
+	// abstract static traits($use) {};
 
 }
